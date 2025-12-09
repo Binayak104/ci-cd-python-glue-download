@@ -8,6 +8,7 @@ env:
   AWS_REGION: us-east-1
   # Update this if you change the Terraform project_name
   ECR_REPOSITORY: ci-glue-demo-repo
+  LAMBDA_FUNCTION_NAME: ci-glue-demo-lambda
 
 jobs:
   build-test-push:
@@ -42,25 +43,35 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-     - name: Build and push Docker image via Python glue (commit SHA)
-  env:
-    ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-    ECR_REPOSITORY: ${{ env.ECR_REPOSITORY }}
-    IMAGE_TAG: ${{ github.sha }}
-  run: |
-    python -m ci_tools.build_and_push_image
+      - name: Build and push Docker image via Python glue (commit SHA)
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ env.ECR_REPOSITORY }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          python -m ci_tools.build_and_push_image
 
-- name: Tag and push bootstrap image (for Lambda/ECS)
-  env:
-    ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-    ECR_REPOSITORY: ${{ env.ECR_REPOSITORY }}
-    SOURCE_TAG: ${{ github.sha }}
-    BOOTSTRAP_TAG: bootstrap
-  run: |
-    docker pull $ECR_REGISTRY/$ECR_REPOSITORY:$SOURCE_TAG
-    docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$SOURCE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:$BOOTSTRAP_TAG
-    docker push $ECR_REGISTRY/$ECR_REPOSITORY:$BOOTSTRAP_TAG
+      - name: Tag and push bootstrap image (for Lambda/ECS)
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ env.ECR_REPOSITORY }}
+          SOURCE_TAG: ${{ github.sha }}
+          BOOTSTRAP_TAG: bootstrap
+        run: |
+          docker pull $ECR_REGISTRY/$ECR_REPOSITORY:$SOURCE_TAG
+          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$SOURCE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:$BOOTSTRAP_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$BOOTSTRAP_TAG
 
+      - name: Update Lambda to new image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ env.ECR_REPOSITORY }}
+          IMAGE_TAG: ${{ github.sha }}
+          LAMBDA_FUNCTION_NAME: ${{ env.LAMBDA_FUNCTION_NAME }}
+        run: |
+          aws lambda update-function-code \
+            --function-name "$LAMBDA_FUNCTION_NAME" \
+            --image-uri "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
 
   # Optional deploy job using Python + requests to trigger Jenkins
   deploy:
